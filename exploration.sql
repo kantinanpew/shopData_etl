@@ -56,3 +56,16 @@ SELECT status, COUNT(*) AS total, ROUND(SUM(total_amount),2) AS sum_amount
 FROM vw_raw_orders
 GROUP BY status;
 
+
+------- EXCHANGE RATES
+-- check for other currency that has no exchange rate
+SELECT o.order_id, o.order_date, o.currency, o.total_amount
+FROM vw_raw_orders o
+LEFT JOIN vw_exchange_rates r 
+    ON r.currency = o.currency AND r.date = o.order_date
+WHERE o.currency IS NOT NULL AND o.currency <> 'USD' AND r.rate_to_usd IS NULL;
+
+-- rate coverage
+SELECT currency , MIN(date) AS first_date, MAX(date) AS last_date, COUNT (*) AS total
+FROM vw_exchange_rates
+GROUP BY currency;
