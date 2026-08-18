@@ -24,10 +24,10 @@ OR email IS NULL OR TRIM(phone) = '';
 SELECT customer_id, phone,
     CASE 
         WHEN phone GLOB '*[A-Za-z]*' THEN 'contains letters'
-        WHEN phone GLOB '*[^0-9]' THEN 'contains symbols/ spaces'
+        WHEN phone GLOB '*[^0-9]*' THEN 'contains symbols/ spaces'
     END AS issue
 FROM vw_raw_customers
-WHERE phone IS NOT NULL AND phone GLOB '*[^0-9]';
+WHERE phone IS NOT NULL AND phone GLOB '*[^0-9]*';
 
 
 -------- ORDERS
