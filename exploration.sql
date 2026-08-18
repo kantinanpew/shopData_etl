@@ -18,7 +18,7 @@ HAVING COUNT(*) >1;
 SELECT customer_id, full_name, email, phone
 FROM vw_raw_customers
 WHERE  email IS NULL OR TRIM(email) = ''
-OR email IS NULL OR TRIM(phone) = '';
+OR phone IS NULL OR TRIM(phone) = '';
 
 -- check the phone no. formats
 SELECT customer_id, phone,
