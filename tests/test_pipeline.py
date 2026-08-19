@@ -30,7 +30,7 @@ def test_standardize_phone(raw, expected):
 
 
 def _customers():
-    """Small fixture covering duplicates, a null email and an empty email."""
+    """Small fixture covering duplicates, a null email and an empty email"""
     return pd.DataFrame(
         {
             "customer_id": [1, 2, 1, 3],
