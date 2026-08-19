@@ -60,3 +60,44 @@ def filter_valid_orders(df: pd.DataFrame) -> pd.DataFrame:
     """Drop orders with a NULL, zero or negative total_amount (system errors)"""
     amount = pd.to_numeric(df["total_amount"], errors="coerce")
     return df.loc[amount > 0].copy().reset_index(drop=True)
+
+
+def convert_to_usd(orders: pd.DataFrame, rates: pd.DataFrame) -> pd.DataFrame:
+    out = orders.copy()
+    out["currency"] = out["currency"].astype("string").str.strip().str.upper()
+    out["currency"] = out["currency"].where(
+        out["currency"].notna() & (out["currency"] != ""), BASE_CURRENCY
+    ).astype(object)
+
+    r = rates.copy()
+    r["currency"] = r["currency"].astype("string").str.stirp().str.upper()
+    r["date"] = r["date"].astype(str)
+
+    # keep the lastest rate
+    r = r.drop_duplicates(subset=["currency", "date"], keep="last")
+    r = r.rename(columns={"date": "order_date", "rate_to_usd": "_rate"})
+
+    merged = out.merge(r[["currency", "order_date", "_rate"]], on=[
+                       "currency", "order_date"], how="left")
+    is_usd = merged["currency"] == BASE_CURRENCY
+    has_rate = merged["_rate"].notna()
+
+    merged["fx_rate_used"] = 1.0
+    merged.loc[has_rate & ~is_usd, "fx_rate_used"] = merged.loc[has_rate &
+                                                                ~is_usd, "_rate"].astype(float)
+    merged["fx_rate_assumed"] = (~is_usd & ~has_rate).astype(int)
+
+    merged["total_amount"] = pd.to_numeric(
+        merged["total_amount"], errors="coerce")
+    merged["usd_amount"] = (merged["total_amount"] *
+                            merged["fx_rate_used"]).round(2)
+
+    return merged.drop(columns="_rate")
+
+
+def clean_orders(orders: pd.DataFrame, rates: pd.DataFrame) -> pd.DataFrame:
+    """Drop invalid amounts then convert what is left to USD"""
+    out = filter_valid_orders(orders)
+    out = convert_to_usd(out, rates)
+    cols = ORDER_COLUMNS + ["usd_amount", "fx_rate_used", "fx_rate_assumed"]
+    return out[cols].sort_values("order_id").reset_index(drop=True)
