@@ -5,7 +5,10 @@ from pipeline import (
     UNKNOWN_EMAIL,
     clean_customers,
     deduplicate_customers,
-    standardize_phone
+    standardize_phone,
+    clean_orders,
+    convert_to_usd,
+    filter_valid_orders
 )
 
 
@@ -75,3 +78,18 @@ def test_clean_customers_fills_missing_email_and_standardizes_phone():
     assert pd.isna(out.loc[3, "phone"])
 
     assert out.loc[3, "full_name"] == "Carl"
+
+
+def test_filter_valid_orders_drops_zero_negative_and_null():
+    df = pd.DataFrame(
+        {
+            "order_id": [1, 2, 3, 4, 5],
+            "customer_id": [1, 1, 1, 1, 1],
+            "order_date": ["2023-05-01"] * 5,
+            "total_amount": [100.0, 0.0, -50.0, None, 0.01],
+            "currency": ["USD"] * 5,
+            "status": ["COMPLETED"] * 5,
+        }
+    )
+    out = filter_valid_orders(df)
+    assert out.order_id.tolist() == [1, 5]
