@@ -1,0 +1,182 @@
+import pandas as pd
+import pytest
+
+from pipeline import (
+    UNKNOWN_EMAIL,
+    clean_customers,
+    deduplicate_customers,
+    standardize_phone,
+    clean_orders,
+    convert_to_usd,
+    filter_valid_orders
+)
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("+1 (555) 123-4567", "15551234567"),
+        ("555-987-6543", "5559876543"),
+        ("(555) 333 4444", "5553334444"),
+        ("+44 20 7123 1234", "442071231234"),
+        ("1234567890", "1234567890"),
+        ("1-800-555-DINO", "1800555"),  # letters stripe
+        ("Ext 444", "444"),
+        (None, None),
+        (float("nan"), None),
+        ("", None),
+        ("abc", None),  # no values
+    ],
+)
+def test_standardize_phone(raw, expected):
+    assert standardize_phone(raw) == expected
+
+
+def _customers():
+    """Small fixture covering duplicates, a null email and an empty email"""
+    return pd.DataFrame(
+        {
+            "customer_id": [1, 2, 1, 3],
+            "full_name": ["Alice Smith", "Bob Jones", "Alice Smith", "Carl "],
+            "email": ["alice@old.com", None, "alice@new.com", ""],
+            "phone": ["+1 (555) 123-4567", "555-987-6543", "15551234567", None],
+            "signup_date": ["2023-01-15", "2023-02-20", "2023-06-01", "2023-03-05"],
+        }
+    )
+
+
+def test_deduplicate_keeps_most_recent_signup():
+    out = deduplicate_customers(_customers())
+    assert len(out) == 3
+    alice = out.loc[out.customer_id == 1].iloc[0]
+    assert alice.signup_date == "2023-06-01"
+    assert alice.email == "alice@new.com"
+
+
+def test_deduplicate_valid_date_beats_invalid_date():
+    df = pd.DataFrame(
+        {
+            "customer_id": [1, 1],
+            "full_name": ["A", "A"],
+            "email": ["good@x.com", "bad@x.com"],
+            "phone": [None, None],
+            "signup_date": ["2023-01-01", "not-a-date"],
+        }
+    )
+    out = deduplicate_customers(df)
+    assert len(out) == 1
+    assert out.iloc[0].email == "good@x.com"
+
+
+def test_clean_customers_fills_missing_email_and_standardizes_phone():
+    out = clean_customers(_customers()).set_index("customer_id")
+
+    assert out.loc[2, "email"] == UNKNOWN_EMAIL      # unknown
+    assert out.loc[3, "email"] == UNKNOWN_EMAIL      # unknown
+    assert out.loc[1, "email"] == "alice@new.com"    # keep this
+    assert out.loc[1, "phone"] == "15551234567"
+    assert pd.isna(out.loc[3, "phone"])
+
+    assert out.loc[3, "full_name"] == "Carl"
+
+
+def test_filter_valid_orders_drops_zero_negative_and_null():
+    df = pd.DataFrame(
+        {
+            "order_id": [1, 2, 3, 4, 5],
+            "customer_id": [1, 1, 1, 1, 1],
+            "order_date": ["2023-05-01"] * 5,
+            "total_amount": [100.0, 0.0, -50.0, None, 0.01],
+            "currency": ["USD"] * 5,
+            "status": ["COMPLETED"] * 5,
+        }
+    )
+    out = filter_valid_orders(df)
+    assert out.order_id.tolist() == [1, 5]
+
+
+def _rates():
+    """Rates for 05-01 and 05-02 only so later dates have nothing to match"""
+    return pd.DataFrame(
+        {
+            "currency": ["EUR", "EUR", "JPY", "gbp"],
+            "rate_to_usd": [1.10, 1.12, 0.007, 1.25],
+            "date": ["2023-05-01", "2023-05-02", "2023-05-01", "2023-05-01"],
+        }
+    )
+
+
+def _orders():
+    """One order per conversion case: normal, case-mangled, USD, null, no rate"""
+    return pd.DataFrame(
+        {
+            "order_id": [1, 2, 3, 4, 5, 6],
+            "customer_id": [1] * 6,
+            "order_date": [
+                "2023-05-01",   # EUR with a rate
+                "2023-05-02",   # EUR different rate that day
+                "2023-05-01",
+                "2023-05-01",   # null currency will be USD
+                "2023-05-09",   # no EUR rate on this day
+                "2023-05-01",
+            ],
+            "total_amount": [200.0, 300.0, 150.0, 120.0, 89.0, 10000.0],
+            "currency": ["EUR", " eur ", "USD", None, "EUR", "JPY"],
+            "status": ["COMPLETED"] * 6,
+        }
+    )
+
+
+def test_convert_to_usd_uses_the_rate_for_that_date():
+    out = convert_to_usd(_orders(), _rates()).set_index("order_id")
+    assert out.loc[1, "usd_amount"] == pytest.approx(220.0)  # 200 x 1.10
+    assert out.loc[6, "usd_amount"] == pytest.approx(70.0)  # 10000 x 0.007
+    assert out.loc[1, "fx_rate_assumed"] == 0
+
+
+def test_convert_to_usd_normalizes_currency_case():
+    out = convert_to_usd(_orders(), _rates()).set_index("order_id")
+    assert out.loc[2, "currency"] == "EUR"
+    assert out.loc[2, "usd_amount"] == pytest.approx(336.0)  # 300 x 1.12
+
+
+def test_convert_to_usd_leaves_usd_alone():
+    out = convert_to_usd(_orders(), _rates()).set_index("order_id")
+    assert out.loc[3, "usd_amount"] == pytest.approx(150.0)
+    assert out.loc[3, "fx_rate_used"] == 1.0
+    assert out.loc[3, "fx_rate_assumed"] == 0
+
+
+def test_convert_to_usd_treats_missing_currency_as_usd():
+    out = convert_to_usd(_orders(), _rates()).set_index("order_id")
+    assert out.loc[4, "currency"] == "USD"
+    assert out.loc[4, "usd_amount"] == pytest.approx(120.0)
+    assert out.loc[4, "fx_rate_assumed"] == 0
+
+
+def test_convert_to_usd_flags_rows_with_no_matching_rate():
+    out = convert_to_usd(_orders(), _rates()).set_index("order_id")
+    assert out.loc[5, "usd_amount"] == pytest.approx(89.0)  # left as-is
+    assert out.loc[5, "fx_rate_assumed"] == 1
+
+
+def test_convert_to_usd_does_not_duplicate_rows():
+    orders = _orders()
+    assert len(convert_to_usd(orders, _rates())) == len(orders)
+
+
+def test_clean_orders_filters_before_converting():
+    orders = pd.concat(
+        [
+            _orders(),
+            pd.DataFrame(
+                {"order_id": [99], "customer_id": [1], "order_date": ["2023-05-01"],
+                 "total_amount": [-1.0], "currency": ["EUR"], "status": ["SYSTEM_ERROR"]}
+            ),
+        ],
+        ignore_index=True,
+    )
+    out = clean_orders(orders, _rates())
+    assert 99 not in out.order_id.values
+    assert len(out) == 6
+    assert "usd_amount" in out.columns
