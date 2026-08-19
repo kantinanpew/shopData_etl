@@ -125,3 +125,41 @@ def _orders():
             "status": ["COMPLETED"] * 6,
         }
     )
+
+
+def test_convert_to_usd_uses_the_rate_for_that_date():
+    out = convert_to_usd(_orders(), _rates()).set_index("order_id")
+    assert out.loc[1, "usd_amount"] == pytest.approx(220.0)  # 200 x 1.10
+    assert out.loc[6, "usd_amount"] == pytest.approx(70.0)  # 10000 x 0.007
+    assert out.loc[1, "fx_rate_assumed"] == 0
+
+
+def test_convert_to_usd_normalizes_currency_case():
+    out = convert_to_usd(_orders(), _rates()).set_index("order_id")
+    assert out.loc[2, "currency"] == "EUR"
+    assert out.loc[2, "usd_amount"] == pytest.approx(336.0)  # 300 x 1.12
+
+
+def test_convert_to_usd_leaves_usd_alone():
+    out = convert_to_usd(_orders(), _rates()).set_index("order_id")
+    assert out.loc[3, "usd_amount"] == pytest.approx(150.0)
+    assert out.loc[3, "fx_rate_used"] == 1.0
+    assert out.loc[3, "fx_rate_assumed"] == 0
+
+
+def test_convert_to_usd_treats_missing_currency_as_usd():
+    out = convert_to_usd(_orders(), _rates()).set_index("order_id")
+    assert out.loc[4, "currency"] == "USD"
+    assert out.loc[4, "usd_amount"] == pytest.approx(120.0)
+    assert out.loc[4, "fx_rate_assumed"] == 0
+
+
+def test_convert_to_usd_flags_rows_with_no_matching_rate():
+    out = convert_to_usd(_orders(), _rates()).set_index("order_id")
+    assert out.loc[5, "usd_amount"] == pytest.approx(89.0)  # left as-is
+    assert out.loc[5, "fx_rate_assumed"] == 1
+
+
+def test_convert_to_usd_does_not_duplicate_rows():
+    orders = _orders()
+    assert len(convert_to_usd(orders, _rates())) == len(orders)
