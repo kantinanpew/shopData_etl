@@ -163,10 +163,8 @@ def transform_orders(raw: pd.DataFrame, rates: pd.DataFrame) -> pd.DataFrame:
 
 @task(name="load_to_sqlite")
 def load_to_sqlite(customers: pd.DataFrame, orders: pd.DataFrame, target_db: Path) -> str:
-    """
-    Write dim_customers and fct_orders to the target database.
-    Falls back to CSV if the SQLite write fails, as allowed by the spec.
-    """
+    """Write dim_customers and fct_orders to the target database.
+    Falls back to CSV if the SQLite write fails, as allowed by the spec"""
     logger = get_run_logger()
     target_db = Path(target_db)
     target_db.parent.mkdir(parents=True, exist_ok=True)
