@@ -93,3 +93,35 @@ def test_filter_valid_orders_drops_zero_negative_and_null():
     )
     out = filter_valid_orders(df)
     assert out.order_id.tolist() == [1, 5]
+
+
+def _rates():
+    """Rates for 05-01 and 05-02 only so later dates have nothing to match"""
+    return pd.DataFrame(
+        {
+            "currency": ["EUR", "EUR", "JPY", "gbp"],
+            "rate_to_usd": [1.10, 1.12, 0.007, 1.25],
+            "date": ["2023-05-01", "2023-05-02", "2023-05-01", "2023-05-01"],
+        }
+    )
+
+
+def _orders():
+    """One order per conversion case: normal, case-mangled, USD, null, no rate"""
+    return pd.DataFrame(
+        {
+            "order_id": [1, 2, 3, 4, 5, 6],
+            "customer_id": [1] * 6,
+            "order_date": [
+                "2023-05-01",   # EUR with a rate
+                "2023-05-02",   # EUR different rate that day
+                "2023-05-01",
+                "2023-05-01",   # null currency will be USD
+                "2023-05-09",   # no EUR rate on this day
+                "2023-05-01",
+            ],
+            "total_amount": [200.0, 300.0, 150.0, 120.0, 89.0, 10000.0],
+            "currency": ["EUR", " eur ", "USD", None, "EUR", "JPY"],
+            "status": ["COMPLETED"] * 6,
+        }
+    )
