@@ -38,3 +38,25 @@ def deduplicate_customers(df: pd.DataFrame) -> pd.DataFrame:
 
     )
     return out
+
+
+def clean_customers(df: pd.DataFrame) -> pd.DataFrame:
+    out = deduplicate_customers(df)
+    out["phone"] = out["phone"].map(standardize_phone)
+
+    email = out["email"].astype("string").str.stripe()
+    out["email"] = email.where(email.notna() & (
+        email != ""), UNKNOWN_EMAIL).astype(object)
+
+    out["full_name"] = out["full_name"].astype(
+        "string").str.strip().astype(object)
+    out["signup_date"] = pd.to_datetime(
+        out["signup_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+
+    return out[CUSTOMER_COLUMNS].sort_values("customer_id").reset_index(drop=True)
+
+
+def filter_valid_orders(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop orders with a NULL, zero or negative total_amount (system errors)."""
+    amount = pd.to_numeric(df["total_amount"], errors="coerce")
+    return df.loc[amount > 0].copy().reset_index(drop=True)
