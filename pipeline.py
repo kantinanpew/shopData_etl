@@ -22,3 +22,19 @@ def standardize_phone(phone):
         return None
     digits = re.sub(r"\D", "", str(phone))
     return digits or None
+
+
+def deduplicate_customers(df: pd.DataFrame) -> pd.DataFrame:
+    """One row per customer_id, keeping the most recent signup_date."""
+
+    out = df.copy()
+    out["_signup_dt"] = pd.to_datetime(out["signup_date"], errors="coerce")
+    out = (
+        out.sort_values(["customer_id", "_signup_dt"], na_position="first")
+        .drop_duplicates(subset="customer_id", keep="last")
+        .drop(columns="_signup_dt")
+        .reset_index(drop=True)
+        # drop nat on top and keep the last row which is recent date
+
+    )
+    return out
