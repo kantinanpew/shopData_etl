@@ -4,8 +4,8 @@ from pathlib import Path
 import pandas as pd
 from prefect import flow, get_run_logger, task
 
-DEFUALT_SOURCE_DB = Path("data/shopdata.db")
-DEFUALT_TARGET_DB = Path("data/analytics.db")
+DEFAULT_SOURCE_DB = Path("data/shopdata.db")
+DEFAULT_TARGET_DB = Path("data/analytics.db")
 
 UNKNOWN_EMAIL = "unknown@domain.com"
 BASE_CURRENCY = "USD"
@@ -44,7 +44,7 @@ def clean_customers(df: pd.DataFrame) -> pd.DataFrame:
     out = deduplicate_customers(df)
     out["phone"] = out["phone"].map(standardize_phone)
 
-    email = out["email"].astype("string").str.stripe()
+    email = out["email"].astype("string").str.strip()
     out["email"] = email.where(email.notna() & (
         email != ""), UNKNOWN_EMAIL).astype(object)
 
@@ -70,7 +70,7 @@ def convert_to_usd(orders: pd.DataFrame, rates: pd.DataFrame) -> pd.DataFrame:
     ).astype(object)
 
     r = rates.copy()
-    r["currency"] = r["currency"].astype("string").str.stirp().str.upper()
+    r["currency"] = r["currency"].astype("string").str.strip().str.upper()
     r["date"] = r["date"].astype(str)
 
     # keep the lastest rate
@@ -133,7 +133,7 @@ def transform_customers(raw: pd.DataFrame) -> pd.DataFrame:
         "Customers: %d raw -> %d unique (%d duplicates removed)",
         len(raw), len(cleaned), len(raw) - len(cleaned),
     )
-    logger.info("Customers: %d emails fillers with %s",
+    logger.info("Customers: %d emails filled with %s",
                 int((cleaned["email"] == UNKNOWN_EMAIL).sum()), UNKNOWN_EMAIL)
     logger.info("Customers: %d phones still NULL after standardization",
                 int(cleaned["phone"].isna().sum()))
@@ -142,7 +142,7 @@ def transform_customers(raw: pd.DataFrame) -> pd.DataFrame:
 
 @task(name="transform_orders")
 def transform_orders(raw: pd.DataFrame, rates: pd.DataFrame) -> pd.DataFrame:
-    """Clean the order view, convert to USD, and log what was dropped or assumed"""
+    """Clean the order view, convert to USD and log what was dropped or assumed"""
     logger = get_run_logger()
     missing = set(ORDER_COLUMNS) - set(raw.columns)
     if missing:
@@ -159,3 +159,56 @@ def transform_orders(raw: pd.DataFrame, rates: pd.DataFrame) -> pd.DataFrame:
             "Orders: %d non-USD orders had no exchange rate and were treated as USD", assumed)
     logger.info("Orders: total USD value = %.2f", cleaned["usd_amount"].sum())
     return cleaned
+
+
+@task(name="load_to_sqlite")
+def load_to_sqlite(customers: pd.DataFrame, orders: pd.DataFrame, target_db: Path) -> str:
+    """
+    Write dim_customers and fct_orders to the target database.
+    Falls back to CSV if the SQLite write fails, as allowed by the spec.
+    """
+    logger = get_run_logger()
+    target_db = Path(target_db)
+    target_db.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with sqlite3.connect(target_db) as conn:
+            customers.to_sql("dim_customers", conn,
+                             if_exists="replace", index=False)
+            orders.to_sql("fct_orders", conn, if_exists="replace", index=False)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_fct_orders_customer ON fct_orders(customer_id)")
+        logger.info("Loaded %d customers and %d orders into %s",
+                    len(customers), len(orders), target_db)
+        return f"sqlite:{target_db}"
+    except Exception as exc:
+        logger.error("SQLite load failed (%s), falling back to CSV", exc)
+        cust_csv = Path("data/clean_customers.csv")
+        ord_csv = Path("data/clean_orders.csv")
+        customers.to_csv(cust_csv, index=False)
+        orders.to_csv(ord_csv, index=False)
+        logger.warning("Wrote fallback CSVs: %s, %s", cust_csv, ord_csv)
+        return f"csv:{cust_csv},{ord_csv}"
+
+
+# flow
+@flow(name="shopdata-etl")
+def shopdata_etl(source_db: Path = DEFAULT_SOURCE_DB, target_db: Path = DEFAULT_TARGET_DB) -> str:
+    """Extract the raw views, clean them, and load the result into analytics.db."""
+    logger = get_run_logger()
+    logger.info("Starting ETL: %s -> %s", source_db, target_db)
+
+    raw_customers = extract_view(source_db, "vw_raw_customers")
+    raw_orders = extract_view(source_db, "vw_raw_orders")
+    rates = extract_view(source_db, "vw_exchange_rates")
+
+    dim_customers = transform_customers(raw_customers)
+    fct_orders = transform_orders(raw_orders, rates)
+
+    destination = load_to_sqlite(dim_customers, fct_orders, target_db)
+    logger.info("ETL complete, data written to %s", destination)
+    return destination
+
+
+if __name__ == "__main__":
+    shopdata_etl()
