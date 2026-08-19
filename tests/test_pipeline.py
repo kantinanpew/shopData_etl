@@ -163,3 +163,20 @@ def test_convert_to_usd_flags_rows_with_no_matching_rate():
 def test_convert_to_usd_does_not_duplicate_rows():
     orders = _orders()
     assert len(convert_to_usd(orders, _rates())) == len(orders)
+
+
+def test_clean_orders_filters_before_converting():
+    orders = pd.concat(
+        [
+            _orders(),
+            pd.DataFrame(
+                {"order_id": [99], "customer_id": [1], "order_date": ["2023-05-01"],
+                 "total_amount": [-1.0], "currency": ["EUR"], "status": ["SYSTEM_ERROR"]}
+            ),
+        ],
+        ignore_index=True,
+    )
+    out = clean_orders(orders, _rates())
+    assert 99 not in out.order_id.values
+    assert len(out) == 6
+    assert "usd_amount" in out.columns
