@@ -1,6 +1,6 @@
 # ShopData ETL
 
-Reads the raw views in
+Reads the raw views in shopdata.db, cleans them, and writes dim_customers and fct_orders to analytics.db for CLV reporting.
 `shopdata.db`
 
 ## Setup
@@ -12,6 +12,8 @@ pip install -r requirements.txt
 ```
 
 Needs Python 3.12+
+
+Put the provided `shopdata.db` at `data/shopdata.db` before running anything.
 
 ## Running it
 
@@ -25,6 +27,13 @@ nothing to configure. To watch the run in the UI instead:
 
 ```bash
 prefect server start
+```
+
+The SQL files run against the two databases:
+
+```bash
+sqlite3 -header -column data/shopdata.db  < exploration.sql
+sqlite3 -header -column data/analytics.db < clv_report.sql
 ```
 
 ## Data exploration
@@ -74,13 +83,6 @@ amounts. The spec only filters on amount, so they stay, and `status` is carried
 into `fct_orders` so BI can filter downstream if they want completed orders
 only.
 
-The SQL files run against the two databases:
-
-```bash
-sqlite3 -header -column data/shopdata.db  < exploration.sql
-sqlite3 -header -column data/analytics.db < clv_report.sql
-```
-
 If writing `analytics.db` fails, the load task falls back to
 `data/clean_customers.csv` and `data/clean_orders.csv`.
 
@@ -93,14 +95,14 @@ DataFrames straight into the logic without touching SQLite.
 
 Flow: `extract_view` (x3) -> `transform_customers` / `transform_orders` -> `load_to_sqlite`.
 
-| Table     | Rules applied                                                      |
-| --------- | ------------------------------------------------------------------ |
-| customers | keep the row with the latest signup_date per customer_id           |
-| customers | phone stripped to non-digits removed, empty result becomes NULL    |
-| customers | null or blank email becomes `unknown@domain.com`, names trimmed    |
-| orders    | drop rows where total_amount is null, zero or negative             |
-| orders    | currency trimmed and upper-cased, null or blank becomes USD        |
-| orders    | usd_amount = total_amount x rate matched on (currency, order_date) |
+| Table     | Rules applied                                                                       |
+| --------- | ----------------------------------------------------------------------------------- |
+| customers | keep the row with the latest signup_date per customer_id                            |
+| customers | phone stripped to digits only, empty result becomes NULL, empty result becomes NULL |
+| customers | null or blank email becomes `unknown@domain.com`, names trimmed                     |
+| orders    | drop rows where total_amount is null, zero or negative                              |
+| orders    | currency trimmed and upper-cased, null or blank becomes USD                         |
+| orders    | usd_amount = total_amount x rate matched on (currency, order_date)                  |
 
 Note on phones: a phone that is null in the source stays null, and a phone that
 strips down to an empty string also becomes null. Both end up as NULL in
