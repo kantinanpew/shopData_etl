@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 from prefect import flow, get_run_logger, task
 
-DEFAULT_SOURCE_DB = Path("data/shopdata.db")
+DEFAULT_SOURCE_DB = Path("data/shopdata_big.db")
 DEFAULT_TARGET_DB = Path("data/analytics.db")
 
 UNKNOWN_EMAIL = "unknown@domain.com"

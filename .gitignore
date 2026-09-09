@@ -163,6 +163,7 @@ cython_debug/
 data/analytics.db
 data/clean_customers.csv
 data/clean_orders.csv
+data/shopdata_big.db
 
 #junk
 .DS_Store
